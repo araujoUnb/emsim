@@ -75,7 +75,7 @@ class RectangularPatch:
         # Define the feed as a small cylinder
         feed_radius = 0.5  # Radius of the feed in mm
         start = [self.feed_pos, 0, 0]
-        stop = [self.feed_pos, 0, self.substrate_thickness + self.metal_thickness]
+        stop = [self.feed_pos, 0, self.substrate_thickness]
         
         # Store the feed geometry
         self.geometry['feed'] = {

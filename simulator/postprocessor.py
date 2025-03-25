@@ -36,17 +36,17 @@ class PostProcessor:
     def compute_nf2ff(self, theta=np.arange(-180, 181, 2), phi=[0, 90], center=[0, 0, 1e-3]):
         s11 = self.port.uf_ref / self.port.uf_inc
         s11_dB = 20 * np.log10(np.abs(s11))
-        idx = np.argmin(np.abs(s11_dB))
+        idx = np.argmin(s11_dB)
         freq = self.f[idx]
         
-        print(f"📡 Calculating NF2FF at {freq/1e9:.2f} GHz")
+        print(f"📡 Calculando NF2FF em {freq/1e9:.2f} GHz")
 
-        outfile = "nf2ff_result.h5"
         nf2ff_result = self.nf2ff_box.CalcNF2FF(
-            self.sim_path, outfile, freq, theta, phi,
-            center[0], center[1], center[2]
+            self.sim_path, freq, theta, phi,
+            center=center
         )
         return nf2ff_result, freq
+
 
 
 
@@ -63,22 +63,40 @@ class PostProcessor:
                           template="plotly_white")
         fig.show()
 
-    def plot_3d_radiation(self, nf2ff_result):
-        """Plot 3D radiation pattern (in dB scale) using Plotly."""
-        theta = np.deg2rad(np.arange(-180, 181, 2))
-        phi = np.deg2rad(np.array([0, 90]))
-        E_norm = nf2ff_result.E_norm[0]
+  
 
-        # 3D coordinates from spherical to cartesian
-        theta_grid, phi_grid = np.meshgrid(theta, phi)
-        r = 10 ** (E_norm.T / 20)  # Convert dB to linear magnitude
+    def plot_3d_radiation(self,nf2ff_result):
+        """Plota o padrão de radiação 3D em dB usando Plotly."""
+        # Extraindo os ângulos theta e phi do resultado NF2FF
+        theta = np.deg2rad(nf2ff_result.theta)  # Convertendo para radianos
+        phi = np.deg2rad(nf2ff_result.phi)      # Convertendo para radianos
 
-        X = r * np.cos(theta_grid) * np.sin(phi_grid)
+        # Criando uma grade de coordenadas esféricas
+        theta_grid, phi_grid = np.meshgrid(phi,theta)
+
+        # Extraindo a magnitude normalizada do campo elétrico
+        E_norm = nf2ff_result.E_norm
+
+        # Convertendo a magnitude para escala logarítmica (dB)
+        E_norm_dB = 20 * np.log10(abs(E_norm[0]))
+
+        # Convertendo coordenadas esféricas para cartesianas para plotagem 3D
+        r = E_norm_dB  # Usando os valores em dB diretamente para o raio
+        X = r * np.sin(theta_grid) * np.cos(phi_grid)
         Y = r * np.sin(theta_grid) * np.sin(phi_grid)
-        Z = r * np.cos(phi_grid)
+        Z = r * np.cos(theta_grid)
 
-        fig = go.Figure(data=[go.Surface(x=X, y=Y, z=Z, colorscale='Viridis', showscale=True)])
-        fig.update_layout(title="3D Radiation Pattern",
-                          scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z'),
-                          template="plotly_white")
+        # Criando o gráfico de superfície 3D
+        fig = go.Figure(data=[go.Surface(x=X, y=Y, z=Z, surfacecolor=E_norm_dB, colorscale='Viridis', showscale=True)])
+        fig.update_layout(
+            title="Padrão de Radiação 3D (dB)",
+            scene=dict(
+                xaxis_title='X',
+                yaxis_title='Y',
+                zaxis_title='Z',
+                aspectmode='auto'
+            ),
+            template="plotly_white"
+        )
         fig.show()
+
