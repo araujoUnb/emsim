@@ -6,7 +6,7 @@ from emsim.source import Source
 
 class GaussianPulse(Source):
     """
-    Gaussian‐modulated sinusoidal pulse, vetorizado em PyTorch.
+    Gaussian‐modulated sinusoidal pulse, vectorized in PyTorch.
 
       s(t) = exp[-(t - t0)^2 / (2 τ^2)] * cos(ω0 · t),
 
@@ -21,8 +21,9 @@ class GaussianPulse(Source):
         Parameters:
         - f0        : center frequency (Hz)
         - bandwidth : bandwidth [Hz]
-        - device    : torch.device para operações vetorizadas
+        - device    : torch.device for all tensor operations
         """
+        super().__init__()   # If your Source base class has an __init__, call it
         self.f0 = f0
         self.omega0 = 2.0 * math.pi * f0
         self.bandwidth = bandwidth
@@ -32,29 +33,28 @@ class GaussianPulse(Source):
 
     def value(self, t: float) -> float:
         """
-        Scalar version: computa s(t) para um float t.
+        Scalar version: compute s(t) for a Python float t.
         """
-        env = math.exp(-((t - self.t0)**2) / (2.0 * self.tau**2))
+        env = math.exp(-((t - self.t0) ** 2) / (2.0 * self.tau**2))
         return env * math.cos(self.omega0 * t)
 
     def vector_value(self, t_tensor: torch.Tensor) -> torch.Tensor:
         """
-        Vetorizado: recebe um torch.Tensor de tempos (shape [N]) e retorna
-        tensor de amplitudes (shape [N]), tudo em PyTorch no self.device.
+        Vectorized: given a 1D torch.Tensor of times (shape [N]) returns
+        a torch.Tensor of amplitudes (shape [N]), all on self.device.
         """
-
-        # Garantimos float32 no mesmo device
+        # Ensure float32 on the correct device
         t = t_tensor.to(self.device).float()
 
-        # Cálculo vetorizado do envelope: exp[-(t - t0)^2 / (2 τ^2)]
-        # Note que self.t0 e self.tau são floats; convertemos para tensor no mesmo device
+        # Build tensors for t0 and tau
         t0_tensor = torch.tensor(self.t0, device=self.device, dtype=torch.float32)
         tau_tensor = torch.tensor(self.tau, device=self.device, dtype=torch.float32)
 
+        # Envelope: exp[-(t - t0)^2 / (2 τ^2)]
         env = torch.exp(-((t - t0_tensor) ** 2) / (2.0 * tau_tensor**2))
 
-        # Cálculo vetorizado da portadora: cos(ω0 * t)
-        # ω0 é float; converter para tensor se quisermos, mas cos aceitará um tensor * float
+        # Carrier: cos(ω0 · t)
+        # (We can multiply a float ω0 by a tensor; PyTorch handles it automatically.)
         carrier = torch.cos(self.omega0 * t)
 
         return env * carrier
