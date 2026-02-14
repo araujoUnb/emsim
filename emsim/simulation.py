@@ -12,6 +12,7 @@ Example
     # Then: python Simulations/WR42/postprocess.py
 """
 
+import copy
 import re
 import time
 from pathlib import Path
@@ -163,6 +164,24 @@ class Simulation:
         sim.load_yaml(path, overrides=overrides)
         return sim
 
+    @classmethod
+    def from_config(cls, config: Dict[str, Any]) -> "Simulation":
+        """Create a Simulation with the given config dict (no YAML file).
+
+        Parameters
+        ----------
+        config : dict
+            Full configuration (geometry, frequency, mode, grid, boundaries, run, output).
+
+        Returns
+        -------
+        Simulation
+            Instance with config set. Call build() then run().
+        """
+        sim = cls()
+        sim._config = copy.deepcopy(config)
+        return sim
+
     def load_yaml(
         self,
         path: str,
@@ -219,16 +238,22 @@ class Simulation:
         geom_type = geom_cfg.get("type", "rectangular_waveguide")
         
         if geom_type == "rectangular_waveguide":
-            # Legacy mode: use 'domain' for waveguide dimensions
-            if "domain" not in self._config:
-                raise ValueError("config must contain 'domain' with x, y, z ranges.")
-            dom = self._config["domain"]
-            x0, x1 = float(dom["x"][0]), float(dom["x"][1])
-            y0, y1 = float(dom["y"][0]), float(dom["y"][1])
-            z0, z1 = float(dom["z"][0]), float(dom["z"][1])
-            a = x1 - x0
-            b = y1 - y0
-            length = z1 - z0
+            if "domain" in self._config:
+                dom = self._config["domain"]
+                x0, x1 = float(dom["x"][0]), float(dom["x"][1])
+                y0, y1 = float(dom["y"][0]), float(dom["y"][1])
+                z0, z1 = float(dom["z"][0]), float(dom["z"][1])
+                a = x1 - x0
+                b = y1 - y0
+                length = z1 - z0
+            elif all(k in geom_cfg for k in ("a", "b", "length")):
+                a = float(geom_cfg["a"])
+                b = float(geom_cfg["b"])
+                length = float(geom_cfg["length"])
+            else:
+                raise ValueError(
+                    "config must contain 'domain' (x, y, z ranges) or geometry.a, geometry.b, geometry.length."
+                )
             self._geometry = RectangularWaveguide(a=a, b=b, length=length)
         
         elif geom_type == "patch_antenna":
@@ -258,8 +283,10 @@ class Simulation:
         
         freq = self._config["frequency"]
         gr = self._config["grid"]
-        n_pml = int(gr["n_pml"])
-        f0 = float(freq["f0"])
+        n_pml = int(gr.get("n_pml", 8))
+        f0 = float(freq.get("f0") or freq.get("center"))
+        if f0 <= 0:
+            raise ValueError("frequency must have 'f0' or 'center' (positive).")
         resolution = int(gr["resolution"])
         
         # Get spatial ranges from geometry
@@ -297,16 +324,66 @@ class Simulation:
             # Ground is at k=n_pml (first cell after PML)
             k_ground = n_pml
             
-            # Set substrate material properties
+            # Set substrate material properties (ensure k_range has at least one cell)
+            k_sub_end = min(k_ground + max(1, k_substrate), self._grid.Nz)
             self._grid.materials.set_region(
                 i_range=(i_sub_min, i_sub_max),
                 j_range=(j_sub_min, j_sub_max),
-                k_range=(k_ground, k_ground + k_substrate),
+                k_range=(k_ground, k_sub_end),
                 eps_r=self._geometry.substrate_eps_r,
                 sigma=self._geometry.substrate_kappa
             )
             
             # Recompute coefficients after material change
+            self._grid.materials.compute_coefficients(self._grid.dt)
+
+        # Optional: apply materials from config (catalog or custom library)
+        mat_cfg = self._config.get("materials", {})
+        if mat_cfg.get("regions"):
+            from emsim.materials import get_material_manager
+            mgr = get_material_manager()
+            if mat_cfg.get("library"):
+                lib_path = mat_cfg["library"]
+                if lib_path.endswith(".csv"):
+                    mgr.load_csv(lib_path)
+                elif lib_path.endswith(".json"):
+                    mgr.load_json(lib_path)
+            for reg in mat_cfg["regions"]:
+                name = reg.get("material")
+                if name is None:
+                    continue
+                geom = reg.get("geometry", {})
+                i_range = tuple(geom["i_range"]) if "i_range" in geom else (0, self._grid.Nx)
+                j_range = tuple(geom["j_range"]) if "j_range" in geom else (0, self._grid.Ny)
+                k_range = tuple(geom["k_range"]) if "k_range" in geom else (0, self._grid.Nz)
+                if isinstance(name, dict):
+                    # Inline material definition (e.g. anisotropic)
+                    from emsim.materials.base import AnisotropicMaterial, Material
+                    if name.get("type") == "anisotropic":
+                        mat = AnisotropicMaterial(
+                            name=name.get("name", "anonymous"),
+                            eps_r=float(name.get("eps_r_xx", 1.0)),
+                            eps_r_xx=float(name.get("eps_r_xx", 1.0)),
+                            eps_r_yy=float(name.get("eps_r_yy", 1.0)),
+                            eps_r_zz=float(name.get("eps_r_zz", 1.0)),
+                            eps_r_xy=float(name.get("eps_r_xy", 0.0)),
+                            eps_r_xz=float(name.get("eps_r_xz", 0.0)),
+                            eps_r_yz=float(name.get("eps_r_yz", 0.0)),
+                        )
+                    else:
+                        mat = Material(
+                            name=name.get("name", "custom"),
+                            eps_r=float(name.get("eps_r", 1.0)),
+                            mu_r=float(name.get("mu_r", 1.0)),
+                            sigma=float(name.get("sigma", 0.0)),
+                        )
+                    self._grid.materials.set_material(i_range, j_range, k_range, mat)
+                else:
+                    mgr.apply_to_grid(
+                        self._grid,
+                        region={"i": i_range, "j": j_range, "k": k_range},
+                        material_name=name,
+                    )
             self._grid.materials.compute_coefficients(self._grid.dt)
 
     def _build_ports_and_source(self) -> None:
@@ -315,12 +392,14 @@ class Simulation:
         from emsim.ports.lumped_port import LumpedPort
         
         freq = self._config["frequency"]
-        n_pml = int(self._config["grid"]["n_pml"])
-        
+        n_pml = int(self._config["grid"].get("n_pml", 8))
+        f0 = float(freq.get("f0") or freq.get("center"))
+        bandwidth = float(freq.get("bandwidth", 0.2 * f0))
+
         # Check if we have a port config (patch antenna) or mode config (waveguide)
         port_cfg = self._config.get("port", {})
         mode_cfg = self._config.get("mode", {})
-        
+
         if port_cfg and port_cfg.get("type") == "lumped":
             # Patch antenna with lumped port
             if not isinstance(self._geometry, PatchAntenna):
@@ -347,49 +426,43 @@ class Simulation:
             )
             self._ports = [port]
             self._Z_mode_func = None  # Not used for lumped ports
-        
-        elif mode_cfg and mode_cfg.get("type"):
-            # Waveguide with modal ports
-            m, n = _parse_mode(mode_cfg["type"])
-            
-            # Generate E-field and H-field mode profiles at Yee stagger positions
-            mode_E = te_mode_profile(
-                m, n,
-                self._geometry.a, self._geometry.b,
-                self._grid.Ny, self._grid.Nx,
-                dx=self._grid.dx, dy=self._grid.dy,
-            )
-            mode_H = hx_mode_profile(
-                m, n,
-                self._geometry.a, self._geometry.b,
-                self._grid.Ny, self._grid.Nx,
-                dx=self._grid.dx, dy=self._grid.dy,
-            )
-            
-            k_src = n_pml + 2
-            k_rec = self._grid.Nz - n_pml - 3
-            
-            # Create mode impedance function for S-parameter calculation
-            def Z_mode_func(f: float) -> float:
-                return mode_impedance(m, n, self._geometry.a, self._geometry.b, f)
-            self._Z_mode_func = Z_mode_func
-            
-            self._input_port = Port(
-                "input", k_plane=k_src, mode_profile_E=mode_E, mode_profile_H=mode_H, direction=1
-            )
-            self._output_port = Port(
-                "output", k_plane=k_rec, mode_profile_E=mode_E, mode_profile_H=mode_H, direction=1
-            )
-            self._ports = [self._input_port, self._output_port]
-        
+
         else:
-            raise ValueError("Config must contain either 'port' (for lumped) or 'mode' (for waveguide)")
+            # Waveguide with modal ports: support mode.type "TE10" or mode.m / mode.n
+            mode_type_str = mode_cfg.get("type")
+            if not mode_type_str and "m" in mode_cfg and "n" in mode_cfg:
+                mode_type_str = f"TE{mode_cfg['m']}{mode_cfg['n']}"
+            if mode_type_str:
+                m, n = _parse_mode(mode_type_str)
+                mode_E = te_mode_profile(
+                    m, n,
+                    self._geometry.a, self._geometry.b,
+                    self._grid.Ny, self._grid.Nx,
+                    dx=self._grid.dx, dy=self._grid.dy,
+                )
+                mode_H = hx_mode_profile(
+                    m, n,
+                    self._geometry.a, self._geometry.b,
+                    self._grid.Ny, self._grid.Nx,
+                    dx=self._grid.dx, dy=self._grid.dy,
+                )
+                k_src = n_pml + 2
+                k_rec = self._grid.Nz - n_pml - 3
+                def Z_mode_func(f: float) -> float:
+                    return mode_impedance(m, n, self._geometry.a, self._geometry.b, f)
+                self._Z_mode_func = Z_mode_func
+                self._input_port = Port(
+                    "input", k_plane=k_src, mode_profile_E=mode_E, mode_profile_H=mode_H, direction=1
+                )
+                self._output_port = Port(
+                    "output", k_plane=k_rec, mode_profile_E=mode_E, mode_profile_H=mode_H, direction=1
+                )
+                self._ports = [self._input_port, self._output_port]
+            else:
+                raise ValueError("Config must contain either 'port' (for lumped) or 'mode' (for waveguide)")
         
         # Source is always GaussianPulse
-        self._source = GaussianPulse(
-            f0=float(freq["f0"]),
-            bandwidth=float(freq["bandwidth"]),
-        )
+        self._source = GaussianPulse(f0=f0, bandwidth=bandwidth)
 
     def _build_solver(self) -> None:
         """Build FDTDSolver from config and already-built grid/ports/source."""
@@ -398,7 +471,30 @@ class Simulation:
         
         run_cfg = self._config["run"]
         b = self._config["boundaries"]
-        n_pml = int(self._config["grid"]["n_pml"])
+        n_pml = int(self._config["grid"].get("n_pml", 8))
+        # CPML requires N_pml cells per face; cap to fit grid
+        n_pml = max(1, min(n_pml, self._grid.Nx - 1, self._grid.Ny - 1, self._grid.Nz - 1))
+
+        # Normalize boundaries: accept { pec: [], pml: [] } or { x: [lo, hi], y: [], z: [] }
+        if "pml" in b:
+            pec_faces = set(b.get("pec", []))
+            pml_faces = set(b["pml"])
+        else:
+            pec_faces = set()
+            pml_faces = set()
+            for axis in ("x", "y", "z"):
+                pair = b.get(axis, [])
+                if len(pair) != 2:
+                    continue
+                lo, hi = pair
+                if lo == "cpml":
+                    pml_faces.add(f"{axis}-")
+                elif lo == "pec":
+                    pec_faces.add(f"{axis}-")
+                if hi == "cpml":
+                    pml_faces.add(f"{axis}+")
+                elif hi == "pec":
+                    pec_faces.add(f"{axis}+")
         
         conv_tol = run_cfg.get("conv_tol")
         if conv_tol is not None:
@@ -408,7 +504,7 @@ class Simulation:
         nf2ff_cfg = self._config.get("nf2ff", {})
         nf2ff_box = None
         if nf2ff_cfg.get("enabled", False):
-            margin_cells = int(nf2ff_cfg.get("box_margin", 10e-3) / self._grid.dx)
+            margin_cells = int(float(nf2ff_cfg.get("box_margin", 10e-3)) / self._grid.dx)
             i_min = max(margin_cells, 0)
             i_max = min(self._grid.Nx - margin_cells, self._grid.Nx)
             j_min = max(margin_cells, 0)
@@ -466,8 +562,8 @@ class Simulation:
             input_port=getattr(self, '_input_port', None),  # backward compat
             output_port=getattr(self, '_output_port', None),  # backward compat
             Z_mode_func=self._Z_mode_func,
-            pec_faces=set(b.get("pec", [])),
-            pml_faces=set(b["pml"]),
+            pec_faces=pec_faces,
+            pml_faces=pml_faces,
             pec_regions=pec_regions,
             n_pml=n_pml,
             n_steps=int(run_cfg["n_steps"]),
@@ -536,7 +632,7 @@ class Simulation:
 
         run_cfg = self._config["run"]
         out_cfg = self._config.get("output", {})
-        output_dir = Path(out_cfg.get("dir", "."))
+        output_dir = Path(out_cfg.get("dir") or out_cfg.get("directory", "."))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Print configuration and device (device always shown)

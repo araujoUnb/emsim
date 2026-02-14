@@ -19,6 +19,7 @@ import tensorflow as tf
 
 from emsim.fdtd.grid import YeeGrid
 from emsim.fdtd.fields import update_H, update_E
+from emsim.fdtd.fields_dispersive import update_E_with_dispersion
 from emsim.boundaries.cpml import CPML
 from emsim.boundaries.pec import apply_pec, apply_pec_patch
 from emsim.sources.injector import inject_soft_source
@@ -128,6 +129,17 @@ class FDTDSolver:
                 pml_faces=pml_faces,
             )
 
+        # Use combined E-update when dispersive or anisotropic regions are present
+        has_drude = (
+            len(grid.materials.dispersive_regions) > 0
+            and getattr(grid.materials, "_drude_mask", None) is not None
+        )
+        has_aniso = (
+            len(grid.materials.anisotropic_regions) > 0
+            and getattr(grid.materials, "_aniso_mask", None) is not None
+        )
+        self.has_dispersive = has_drude or has_aniso
+
         # Precompute source waveform for all time steps.
         # Use float64 for time values to avoid precision loss at large step
         # counts (n*dt with dt ~ 1e-13 needs >7 significant digits).
@@ -179,6 +191,8 @@ class FDTDSolver:
         Ez_snapshots = []
         mid_y = g.Ny // 2
         print_every = max(self.n_steps // 10, 1)
+        curl_coeffs = g.get_curl_coefficients()
+        inv_dx, inv_dy, inv_dz = curl_coeffs["inv_dx"], curl_coeffs["inv_dy"], curl_coeffs["inv_dz"]
         
         # For temporal convergence check (only after minimum 25% of steps)
         min_steps_before_conv = max(self.n_steps // 4, 500)  # at least 25% or 500 steps
@@ -200,7 +214,7 @@ class FDTDSolver:
 
             # --- 2. H-field update  (H^{n-1/2} → H^{n+1/2}) ---
             update_H(g.Ex, g.Ey, g.Ez, g.Hx, g.Hy, g.Hz,
-                     m.dt_over_mu, g.dx, g.dy, g.dz)
+                     m.dt_over_mu, inv_dx, inv_dy, inv_dz)
 
             # --- 3. CPML H corrections ---
             if self.cpml is not None:
@@ -216,12 +230,21 @@ class FDTDSolver:
                         # Modal port: record overlap integrals
                         port.record(g.Ey, Hx_interp, g.dy, g.dx)
                     elif isinstance(port, LumpedPort):
-                        # Lumped port: record V and I
-                        port.record(g.Ez, g.Hx, g.Hy, dl=g.dz, ds=g.dx*g.dy)
+                        # Lumped port: record V and I (use local spacing if non-uniform)
+                        i, j, k = port.position
+                        dl = g.dz_at(k)
+                        ds = g.dx_at(i) * g.dy_at(j)
+                        port.record(g.Ez, g.Hx, g.Hy, dl=dl, ds=ds)
 
             # --- 5. E-field update  (E^n → E^{n+1}) ---
-            update_E(g.Ex, g.Ey, g.Ez, g.Hx, g.Hy, g.Hz,
-                     m.Ca, m.Cb, g.dx, g.dy, g.dz)
+            if self.has_dispersive:
+                update_E_with_dispersion(
+                    g.Ex, g.Ey, g.Ez, g.Hx, g.Hy, g.Hz,
+                    m, inv_dx, inv_dy, inv_dz, g.dt,
+                )
+            else:
+                update_E(g.Ex, g.Ey, g.Ez, g.Hx, g.Hy, g.Hz,
+                         m.Ca, m.Cb, inv_dx, inv_dy, inv_dz)
 
             # --- 6. CPML E corrections ---
             if self.cpml is not None:
@@ -233,8 +256,9 @@ class FDTDSolver:
                     # Modal port injection
                     inject_soft_source(g.Ey, port.k_plane, port.mode_profile_E, amp)
                 elif isinstance(port, LumpedPort):
-                    # Lumped port injection
-                    port.inject(g.Ez, amp, dl=g.dz)
+                    # Lumped port injection (use local dz at port)
+                    _, _, k = port.position
+                    port.inject(g.Ez, amp, dl=g.dz_at(k))
 
             # --- 8. PEC boundary enforcement (must be last field modification) ---
             if self.pec_faces:

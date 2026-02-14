@@ -57,9 +57,9 @@ def test_compute_coefficients():
     # Lossless: Ca should be 1
     assert tf.reduce_all(tf.abs(mat.Ca - 1.0) < 1e-6).numpy()
     
-    # Cb should be dt/eps
+    # Cb should be dt/eps (use float32 appropriate tolerance)
     expected_Cb = dt / EPS0
-    assert tf.reduce_all(tf.abs(mat.Cb - expected_Cb) < 1e-20).numpy()
+    assert tf.reduce_all(tf.abs(mat.Cb - expected_Cb) < 1e-6).numpy()
 
 
 def test_set_region_permittivity():

@@ -145,6 +145,65 @@ def patch_antenna_params():
     }
 
 
+@pytest.fixture
+def basic_materials():
+    """Common material configurations for testing.
+    
+    Returns dict with keys:
+    - vacuum: Perfect vacuum (eps_r=1.0, mu_r=1.0, sigma=0.0)
+    - lossy: Lossy dielectric (eps_r=1.0, mu_r=1.0, sigma=0.01)
+    - dielectric: Lossless dielectric (eps_r=2.5, mu_r=1.0, sigma=0.0)
+    - high_dielectric: High permittivity (eps_r=10.0)
+    - conductor: Lossy conductor (sigma=1.0)
+    """
+    return {
+        'vacuum': {'eps_r': 1.0, 'mu_r': 1.0, 'sigma': 0.0},
+        'lossy': {'eps_r': 1.0, 'mu_r': 1.0, 'sigma': 0.01},
+        'dielectric': {'eps_r': 2.5, 'mu_r': 1.0, 'sigma': 0.0},
+        'high_dielectric': {'eps_r': 10.0, 'mu_r': 1.0, 'sigma': 0.0},
+        'conductor': {'eps_r': 1.0, 'mu_r': 1.0, 'sigma': 1.0},
+    }
+
+
+@pytest.fixture
+def pml_config():
+    """Standard PML boundary configurations.
+    
+    Returns dict with keys:
+    - all_faces: All 6 faces have PML
+    - z_only: PML on z- and z+ only (typical for waveguides)
+    - xy_only: PML on x and y faces (open in z)
+    - n_pml: Default number of PML cells (8)
+    """
+    return {
+        'all_faces': {'x-', 'x+', 'y-', 'y+', 'z-', 'z+'},
+        'z_only': {'z-', 'z+'},
+        'xy_only': {'x-', 'x+', 'y-', 'y+'},
+        'n_pml': 8
+    }
+
+
+@pytest.fixture
+def tolerances():
+    """Standard tolerance values for different types of validation tests.
+    
+    Returns dict with recommended tolerances:
+    - frequency: Relative tolerance for frequency measurements (0.005 = 0.5%)
+    - impedance: Relative tolerance for impedance (0.02 = 2%)
+    - energy: Relative tolerance for energy conservation (0.05 = 5%)
+    - field: Absolute tolerance for field values (1e-6)
+    - reflection: Reflection coefficient in dB (< -30 dB for good PML)
+    """
+    return {
+        'frequency': 0.005,  # ±0.5%
+        'impedance': 0.02,   # ±2%
+        'energy': 0.05,      # ±5%
+        'field': 1e-6,       # Absolute
+        'reflection_db': -30, # dB
+        'speed_of_light': 0.05,  # ±5%
+    }
+
+
 # Markers for different test categories
 def pytest_configure(config):
     """Register custom markers."""

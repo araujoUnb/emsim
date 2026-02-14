@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Execute todos os testes do emsim com relatório detalhado.
+r"""Execute todos os testes do emsim com relatório detalhado.
 
 IMPORTANTE: Ative o ambiente virtual (.venv) antes de executar!
     Windows: .\.venv\Scripts\Activate.ps1

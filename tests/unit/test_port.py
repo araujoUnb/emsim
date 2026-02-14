@@ -56,16 +56,13 @@ def test_port_reset():
     """Test resetting of records."""
     mode_E = tf.ones([5, 5], dtype=tf.float32)
     mode_H = tf.ones([5, 5], dtype=tf.float32)
-    
-    port = Port("test", k_plane=0, mode_profile_E=mode_E, 
+    port = Port("test", k_plane=0, mode_profile_E=mode_E,
                 mode_profile_H=mode_H, direction=1)
-    
-    # Add dummy data
-    port.E_record = [1.0, 2.0, 3.0]
-    port.H_record = [0.1, 0.2, 0.3]
-    
+    Ey = tf.Variable(tf.ones([3, 5, 5], dtype=tf.float32))
+    Hx = tf.Variable(tf.ones([3, 5, 5], dtype=tf.float32))
+    for _ in range(3):
+        port.record(Ey, Hx, 1e-3, 1e-3)
     port.reset()
-    
     assert len(port.E_record) == 0
     assert len(port.H_record) == 0
 
@@ -74,19 +71,18 @@ def test_port_compute_result():
     """Test compute_result returns correct structure."""
     mode_E = tf.ones([5, 5], dtype=tf.float32)
     mode_H = tf.ones([5, 5], dtype=tf.float32)
-    
     port = Port("test", k_plane=0, mode_profile_E=mode_E,
                 mode_profile_H=mode_H, direction=1)
-    
-    # Add some dummy recordings
-    port.E_record = [1.0, 2.0, 3.0]
-    port.H_record = [0.1, 0.2, 0.3]
-    
+    Ey = tf.Variable(tf.ones([2, 5, 5], dtype=tf.float32))
+    Hx = tf.Variable(tf.ones([2, 5, 5], dtype=tf.float32) * 0.1)
+    for _ in range(3):
+        port.record(Ey, Hx, 1e-3, 1e-3)
     result = port.compute_result(dt=1e-12)
-    
     assert result['type'] == 'modal'
     assert 'E_record' in result
     assert 'H_record' in result
+    assert len(result['E_record']) == 3
+    assert len(result['H_record']) == 3
     assert result['E_record'] == port.E_record
     assert result['H_record'] == port.H_record
 

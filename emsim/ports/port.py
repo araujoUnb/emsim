@@ -25,8 +25,9 @@ class Port:
         self.mode_profile_E = tf.cast(mode_profile_E, tf.float32)
         self.mode_profile_H = tf.cast(mode_profile_H, tf.float32)
         self.direction = direction
-        self.E_record = []  # time series of E-field overlap integral
-        self.H_record = []  # time series of H-field overlap integral
+        self._E_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._H_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._record_index = 0
 
     def record(self, Ey, Hx, dy, dx):
         """Compute and store the modal overlap integrals at this port.
@@ -35,21 +36,30 @@ class Port:
             overlap_E = sum(Ey[k, :, :] * mode_profile_E) * dy * dx
             overlap_H = sum(Hx[k, :, :] * mode_profile_H) * dy * dx
         """
-        # E-field overlap
         E_slice = Ey[self.k_plane, :, :]
         overlap_E = tf.reduce_sum(E_slice * self.mode_profile_E) * dy * dx
-        self.E_record.append(float(overlap_E.numpy()))
-        
-        # H-field overlap
         H_slice = Hx[self.k_plane, :, :]
         overlap_H = tf.reduce_sum(H_slice * self.mode_profile_H) * dy * dx
-        self.H_record.append(float(overlap_H.numpy()))
+        self._E_array = self._E_array.write(self._record_index, overlap_E)
+        self._H_array = self._H_array.write(self._record_index, overlap_H)
+        self._record_index += 1
 
     def reset(self):
         """Clear all temporal records."""
-        self.E_record = []
-        self.H_record = []
-    
+        self._E_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._H_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._record_index = 0
+
+    @property
+    def E_record(self) -> list:
+        """Time series of E-field overlap (list; from TensorArray when read)."""
+        return self._E_array.stack().numpy().tolist() if self._record_index > 0 else []
+
+    @property
+    def H_record(self) -> list:
+        """Time series of H-field overlap (list; from TensorArray when read)."""
+        return self._H_array.stack().numpy().tolist() if self._record_index > 0 else []
+
     def compute_result(self, dt: float, **kwargs) -> Dict[str, Any]:
         """Return recorded data for S-parameter calculation.
         
@@ -68,8 +78,10 @@ class Port:
             - 'E_record': list of E-field overlap integrals
             - 'H_record': list of H-field overlap integrals
         """
+        E_record = self._E_array.stack().numpy().tolist() if self._record_index > 0 else []
+        H_record = self._H_array.stack().numpy().tolist() if self._record_index > 0 else []
         return {
             'type': 'modal',
-            'E_record': self.E_record,
-            'H_record': self.H_record,
+            'E_record': E_record,
+            'H_record': H_record,
         }

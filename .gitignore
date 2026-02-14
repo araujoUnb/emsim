@@ -74,6 +74,9 @@ conda-meta/
 *.iws
 *.ipr
 
+# Cursor
+.cursor/
+
 # Spyder
 .spyderproject
 .spyproject
@@ -113,6 +116,9 @@ coverage/
 .dmypy.json
 dmypy.json
 
+# Ruff
+.ruff_cache/
+
 # Pyre type checker
 .pyre/
 
@@ -136,6 +142,9 @@ Simulations/*/outputs/*.mp4
 # Keep the outputs directory structure with .gitkeep
 !Simulations/*/outputs/.gitkeep
 
+# Root-level run outputs
+outputs/
+
 # Temporary simulation data
 *.tmp
 *.temp
@@ -149,7 +158,8 @@ temp/
 # Scientific Computing / Data
 # ============================================================================
 
-# Large data files
+# Large data files and outputs
+*.csv
 *.h5
 *.hdf5
 *.nc
@@ -164,12 +174,12 @@ temp/
 logs/
 *.out
 
-# Plots and figures (optional - uncomment if you want to track them)
-# *.png
-# *.jpg
-# *.pdf
-# *.eps
-# *.svg
+# Plots and figures
+*.png
+*.jpg
+*.pdf
+*.eps
+*.svg
 
 # ============================================================================
 # TensorFlow / ML

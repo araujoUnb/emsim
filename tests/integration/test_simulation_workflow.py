@@ -23,8 +23,9 @@ def test_simulation_from_yaml_waveguide():
     if not config_path.exists():
         pytest.skip("WR42 config not found")
     
-    # Load simulation
+    # Load simulation and build (from_yaml only loads config)
     sim = Simulation.from_yaml(str(config_path))
+    sim.build()
     
     # Check that components were built
     assert sim._geometry is not None
@@ -43,6 +44,7 @@ def test_simulation_from_yaml_patch_antenna():
         pytest.skip("Patch Antenna config not found")
     
     sim = Simulation.from_yaml(str(config_path))
+    sim.build()
     
     # Check components
     assert sim._geometry is not None
@@ -98,13 +100,13 @@ def test_simulation_run_short():
         with open(config_path, 'w') as f:
             yaml.dump(config, f)
         
-        # Load and run
+        # Load, build and run
         sim = Simulation.from_yaml(str(config_path))
         result = sim.run()
         
-        # Check result
+        # Check result (solver returns S11, S21, freqs, n_steps_run, etc.)
         assert result is not None
-        assert 'S_parameters' in result or 'ports' in result
+        assert 'n_steps_run' in result or 'S11' in result
 
 
 @pytest.mark.integration
@@ -130,7 +132,7 @@ def test_simulation_geometry_creation():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
     sim._build_geometry()
     
     assert sim._geometry is not None
@@ -161,7 +163,7 @@ def test_simulation_grid_creation():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
     sim._build_geometry()
     sim._build_grid()
     
@@ -193,7 +195,7 @@ def test_simulation_ports_creation():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
     sim._build_geometry()
     sim._build_grid()
     sim._build_ports_and_source()
@@ -224,7 +226,7 @@ def test_simulation_solver_creation():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
     sim._build_geometry()
     sim._build_grid()
     sim._build_ports_and_source()
@@ -253,7 +255,7 @@ def test_simulation_error_handling_invalid_geometry():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
     
     with pytest.raises(ValueError, match="Unknown geometry type"):
         sim._build_geometry()
@@ -281,7 +283,8 @@ def test_simulation_multiple_runs():
         'output': {'directory': 'outputs'},
     }
     
-    sim = Simulation(config)
+    sim = Simulation.from_config(config)
+    sim.build()
     
     # First run
     result1 = sim.run()

@@ -45,8 +45,9 @@ class LumpedPort:
         self.position = (i, j, k)
         self.direction = direction
         self.resistance = resistance
-        self.V_record = []
-        self.I_record = []
+        self._V_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._I_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._record_index = 0
     
     def inject(self, field: tf.Variable, amplitude: float, dl: float):
         """Inject voltage as a soft source: E += V/dl.
@@ -62,7 +63,11 @@ class LumpedPort:
         """
         i, j, k = self.position
         # Soft-source injection: add to existing field
-        field[k, j, i].assign_add(amplitude / dl)
+        # Use scatter_nd_update to modify a single element of tf.Variable
+        indices = [[k, j, i]]
+        updates = [amplitude / dl]
+        current_value = field[k, j, i].numpy()
+        field.scatter_nd_update(indices, [current_value + amplitude / dl])
     
     def record(self, E_field: tf.Variable, H_tangential_1: tf.Variable,
                H_tangential_2: tf.Variable, dl: float, ds: float):
@@ -85,32 +90,29 @@ class LumpedPort:
         Current: I ≈ ∮ H·dl ≈ (H1 - H2) * ds (finite difference approximation)
         """
         i, j, k = self.position
-        
-        # Voltage at port
-        V = float(E_field[k, j, i].numpy()) * dl
-        self.V_record.append(V)
-        
-        # Current from circulation of H around the port
-        # Simplified: use difference of adjacent H components
-        if self.direction == 'z':
-            # For Ez port: use Hx and Hy
-            I = float((H_tangential_1[k, j, i] - H_tangential_2[k, j, i]).numpy()) * ds
-        elif self.direction == 'y':
-            # For Ey port: use Hx and Hz
-            I = float((H_tangential_1[k, j, i] - H_tangential_2[k, j, i]).numpy()) * ds
-        elif self.direction == 'x':
-            # For Ex port: use Hy and Hz
-            I = float((H_tangential_1[k, j, i] - H_tangential_2[k, j, i]).numpy()) * ds
-        else:
-            I = 0.0
-        
-        self.I_record.append(I)
-    
+        V = E_field[k, j, i] * dl
+        dH = H_tangential_1[k, j, i] - H_tangential_2[k, j, i]
+        I = dH * ds
+        self._V_array = self._V_array.write(self._record_index, V)
+        self._I_array = self._I_array.write(self._record_index, I)
+        self._record_index += 1
+
     def reset(self):
         """Clear all temporal records."""
-        self.V_record = []
-        self.I_record = []
-    
+        self._V_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._I_array = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        self._record_index = 0
+
+    @property
+    def V_record(self) -> list:
+        """Time series of voltage (list; from TensorArray when read)."""
+        return self._V_array.stack().numpy().tolist() if self._record_index > 0 else []
+
+    @property
+    def I_record(self) -> list:
+        """Time series of current (list; from TensorArray when read)."""
+        return self._I_array.stack().numpy().tolist() if self._record_index > 0 else []
+
     def compute_result(self, dt: float, **kwargs) -> Dict[str, Any]:
         """Compute input impedance Z_in = V/I in the frequency domain.
         
@@ -132,13 +134,14 @@ class LumpedPort:
             - 'V_record': time-domain voltage
             - 'I_record': time-domain current
         """
-        if not self.V_record or not self.I_record:
+        if self._record_index == 0:
             raise ValueError(f"Port {self.name} has no recorded data. Call record() during simulation.")
-        
+        V_record = self._V_array.stack().numpy()
+        I_record = self._I_array.stack().numpy()
         # FFT to frequency domain
-        V_fft = fft(self.V_record)
-        I_fft = fft(self.I_record)
-        freq_axis = fftfreq(len(self.V_record), dt)
+        V_fft = fft(V_record)
+        I_fft = fft(I_record)
+        freq_axis = fftfreq(len(V_record), dt)
         
         # Impedance Z_in = V/I (avoid division by zero)
         Z_in = np.where(np.abs(I_fft) > 1e-12, V_fft / I_fft, 0.0 + 0.0j)
@@ -155,6 +158,6 @@ class LumpedPort:
             'freqs': freq_axis[pos_freq_mask],
             'Z_in': Z_in[pos_freq_mask],
             'S11': S11[pos_freq_mask],
-            'V_record': self.V_record,
-            'I_record': self.I_record,
+            'V_record': V_record.tolist(),
+            'I_record': I_record.tolist(),
         }

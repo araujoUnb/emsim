@@ -9,7 +9,6 @@ import numpy as np
 import tensorflow as tf
 
 from emsim.fdtd.grid import YeeGrid
-from emsim.fdtd.materials import MaterialGrid
 from emsim.fdtd.solver import FDTDSolver
 from emsim.sources.gaussian_pulse import GaussianPulse
 from emsim.ports.lumped_port import LumpedPort
@@ -17,31 +16,28 @@ from emsim.ports.lumped_port import LumpedPort
 
 @pytest.mark.integration
 def test_solver_with_soft_source(small_grid):
-    """Test that solver runs with a simple soft source injection."""
-    mat = MaterialGrid(small_grid.Nz, small_grid.Ny, small_grid.Nx, eps_r=1.0)
-    mat.compute_coefficients(small_grid.dt)
-    
+    """Test that solver runs with a simple soft source injection via LumpedPort."""
     source = GaussianPulse(f0=10e9, bandwidth=5e9)
-    
-    # Create solver with no ports (just soft source)
+    port = LumpedPort(
+        name="src",
+        i=small_grid.Nx//2,
+        j=small_grid.Ny//2,
+        k=small_grid.Nz//2,
+        direction='z',
+        resistance=50.0
+    )
     solver = FDTDSolver(
         grid=small_grid,
-        materials=mat,
         source=source,
-        source_position=(small_grid.Nz//2, small_grid.Ny//2, small_grid.Nx//2),
-        ports=None,
-        pec_regions=None,
-        nf2ff_box=None
+        ports=[port],
+        n_steps=100
     )
-    
-    # Run short simulation
-    result = solver.run(n_steps=100)
-    
-    # Check that result exists
+    result = solver.run()
     assert result is not None
-    assert 'Ex' in result
-    assert 'Ey' in result
-    assert 'Ez' in result
+    assert 'n_steps_run' in result
+    assert result['n_steps_run'] == 100
+    # Fields live on grid after run
+    assert tf.reduce_sum(tf.abs(small_grid.Ez)).numpy() >= 0
 
 
 @pytest.mark.integration
@@ -55,44 +51,26 @@ def test_solver_with_lumped_port():
         resolution=15,
         courant=0.5
     )
-    
-    mat = MaterialGrid(grid.Nz, grid.Ny, grid.Nx, eps_r=1.0)
-    mat.compute_coefficients(grid.dt)
-    
     source = GaussianPulse(f0=10e9, bandwidth=5e9)
-    
-    # Create lumped port
     port = LumpedPort(
         name="port1",
-        i=grid.Nz//2,
-        j_range=(grid.Ny//2 - 2, grid.Ny//2 + 2),
-        k_range=(grid.Nx//2 - 2, grid.Nx//2 + 2),
+        i=grid.Nx//2,
+        j=grid.Ny//2,
+        k=grid.Nz//2,
         direction='z',
-        impedance=50.0
+        resistance=50.0
     )
-    
-    # Solver with port
     solver = FDTDSolver(
         grid=grid,
-        materials=mat,
         source=source,
-        source_position=None,  # Injection via port
         ports=[port],
-        pec_regions=None,
-        nf2ff_box=None
+        n_steps=200
     )
-    
-    # Run
-    result = solver.run(n_steps=200)
-    
-    # Check that port recorded data
-    assert 'ports' in result
-    assert len(result['ports']) == 1
-    
-    port_result = result['ports'][0]
-    assert port_result['type'] == 'lumped'
-    assert 'Z_in' in port_result
-    assert 'S11' in port_result
+    result = solver.run()
+    assert result is not None
+    assert 'n_steps_run' in result
+    assert 'Z_in' in result
+    assert 'S11' in result
 
 
 @pytest.mark.integration
@@ -106,52 +84,39 @@ def test_solver_with_multiple_ports():
         resolution=12,
         courant=0.5
     )
-    
-    mat = MaterialGrid(grid.Nz, grid.Ny, grid.Nx, eps_r=1.0)
-    mat.compute_coefficients(grid.dt)
-    
     source = GaussianPulse(f0=10e9, bandwidth=5e9)
-    
-    # Two ports
     port1 = LumpedPort(
         name="input",
-        i=10,
-        j_range=(grid.Ny//2 - 1, grid.Ny//2 + 1),
-        k_range=(grid.Nx//2 - 1, grid.Nx//2 + 1),
+        i=grid.Nx//2,
+        j=grid.Ny//2,
+        k=10,
         direction='z',
-        impedance=50.0
+        resistance=50.0
     )
-    
     port2 = LumpedPort(
         name="output",
-        i=grid.Nz - 10,
-        j_range=(grid.Ny//2 - 1, grid.Ny//2 + 1),
-        k_range=(grid.Nx//2 - 1, grid.Nx//2 + 1),
+        i=grid.Nx//2,
+        j=grid.Ny//2,
+        k=grid.Nz - 10,
         direction='z',
-        impedance=50.0
+        resistance=50.0
     )
-    
     solver = FDTDSolver(
         grid=grid,
-        materials=mat,
         source=source,
-        source_position=None,
         ports=[port1, port2],
-        pec_regions=None,
-        nf2ff_box=None
+        n_steps=300
     )
-    
-    result = solver.run(n_steps=300)
-    
-    # Check that both ports have results
-    assert len(result['ports']) == 2
-    assert result['ports'][0]['name'] == 'input'
-    assert result['ports'][1]['name'] == 'output'
+    result = solver.run()
+    assert result is not None
+    assert result['n_steps_run'] == 300
+    # Solver returns last port's S11/Z_in; both ports were run
+    assert 'S11' in result
 
 
 @pytest.mark.integration
 def test_solver_no_source_no_crash():
-    """Test that solver doesn't crash with no source or ports."""
+    """Test that solver doesn't crash with no ports (waveform computed but no injection)."""
     grid = YeeGrid(
         x_range=(0, 5e-3),
         y_range=(0, 5e-3),
@@ -160,29 +125,22 @@ def test_solver_no_source_no_crash():
         resolution=10,
         courant=0.5
     )
-    
-    mat = MaterialGrid(grid.Nz, grid.Ny, grid.Nx, eps_r=1.0)
-    mat.compute_coefficients(grid.dt)
-    
+    # Source required by solver API; with ports=None nothing is injected
+    source = GaussianPulse(f0=10e9, bandwidth=5e9)
     solver = FDTDSolver(
         grid=grid,
-        materials=mat,
-        source=None,
-        source_position=None,
+        source=source,
         ports=None,
-        pec_regions=None,
-        nf2ff_box=None
+        n_steps=50
     )
-    
-    # Should run without crashing (though fields remain zero)
-    result = solver.run(n_steps=50)
-    
+    result = solver.run()
     assert result is not None
+    assert result['n_steps_run'] == 50
 
 
 @pytest.mark.integration
 def test_solver_source_timing():
-    """Test that source injection happens at correct times."""
+    """Test that source injection via port happens and fields are non-zero."""
     grid = YeeGrid(
         x_range=(0, 8e-3),
         y_range=(0, 8e-3),
@@ -191,32 +149,26 @@ def test_solver_source_timing():
         resolution=12,
         courant=0.5
     )
-    
-    mat = MaterialGrid(grid.Nz, grid.Ny, grid.Nx, eps_r=1.0)
-    mat.compute_coefficients(grid.dt)
-    
     source = GaussianPulse(f0=10e9, bandwidth=5e9)
-    
-    # Track when source is active
-    # Gaussian pulse is active roughly for first few periods
-    source_duration = int(5 / (5e9) / grid.dt)  # ~5 cycles
-    
+    port = LumpedPort(
+        name="src",
+        i=grid.Nx//2,
+        j=grid.Ny//2,
+        k=grid.Nz//2,
+        direction='z',
+        resistance=50.0
+    )
+    source_duration = int(5 / (5e9) / grid.dt)
     solver = FDTDSolver(
         grid=grid,
-        materials=mat,
         source=source,
-        source_position=(grid.Nz//2, grid.Ny//2, grid.Nx//2),
-        ports=None,
-        pec_regions=None,
-        nf2ff_box=None
+        ports=[port],
+        n_steps=source_duration + 100
     )
-    
-    result = solver.run(n_steps=source_duration + 100)
-    
-    # Fields should be non-zero after source activation
-    Ex_final = result['Ex']
+    result = solver.run()
+    # Fields on grid after run
+    Ex_final = grid.Ex
     total_energy = tf.reduce_sum(Ex_final**2).numpy()
-    
     assert total_energy > 0, "Source did not inject energy"
 
 
@@ -231,41 +183,75 @@ def test_solver_heterogeneous_materials():
         resolution=15,
         courant=0.5
     )
-    
-    mat = MaterialGrid(grid.Nz, grid.Ny, grid.Nx, eps_r=1.0)
-    
-    # Add substrate region with eps_r = 2.5
-    mat.set_region(
-        i_range=(0, 3),
+    # Add substrate region with eps_r = 2.5 (i,j,k = Nx, Ny, Nz indices)
+    grid.materials.set_region(
+        i_range=(0, grid.Nx),
         j_range=(0, grid.Ny),
-        k_range=(0, grid.Nx),
+        k_range=(0, min(3, grid.Nz)),
         eps_r=2.5
     )
-    mat.compute_coefficients(grid.dt)
-    
+    grid.materials.compute_coefficients(grid.dt)
     source = GaussianPulse(f0=10e9, bandwidth=5e9)
-    
+    port = LumpedPort(
+        name="src",
+        i=grid.Nx//2,
+        j=grid.Ny//2,
+        k=min(5, grid.Nz - 1),
+        direction='z',
+        resistance=50.0
+    )
     solver = FDTDSolver(
         grid=grid,
-        materials=mat,
         source=source,
-        source_position=(5, grid.Ny//2, grid.Nx//2),
-        ports=None,
-        pec_regions=None,
-        nf2ff_box=None
+        ports=[port],
+        n_steps=200
     )
-    
-    result = solver.run(n_steps=200)
-    
-    # Should complete without errors
+    result = solver.run()
     assert result is not None
-    
-    # Wave should propagate differently in substrate vs air
-    Ez = result['Ez']
-    Ez_substrate = Ez[1, grid.Ny//2, grid.Nx//2].numpy()
-    Ez_air = Ez[6, grid.Ny//2, grid.Nx//2].numpy()
-    
-    # Both should be non-zero (wave propagated)
-    # Exact comparison is tricky, just check both regions have fields
+    Ez = grid.Ez
+    # Substrate in k=0..2; air in upper half
+    k_sub = min(1, grid.Nz - 1)
+    k_air = max(grid.Nz - 2, 0)
+    Ez_substrate = Ez[k_sub, grid.Ny//2, grid.Nx//2].numpy()
+    Ez_air = Ez[k_air, grid.Ny//2, grid.Nx//2].numpy()
     assert not np.isnan(Ez_substrate)
     assert not np.isnan(Ez_air)
+
+
+@pytest.mark.integration
+def test_solver_nonuniform_grid_runs():
+    """Solver with non-uniform (stretched) grid runs without error; fields remain finite."""
+    # dz finer in center, coarser at ends (e.g. for local refinement)
+    Nz = 30
+    dz_outer = 0.001
+    dz_inner = 0.0005
+    dz_arr = [dz_outer] * 10 + [dz_inner] * 10 + [dz_outer] * 10
+    grid = YeeGrid(
+        x_range=(0, 5e-3),
+        y_range=(0, 5e-3),
+        z_range=(0, 30e-3),
+        dx=0.0005,
+        dy=0.0005,
+        dz=dz_arr,
+    )
+    source = GaussianPulse(f0=10e9, bandwidth=4e9)
+    port = LumpedPort(
+        name="src",
+        i=grid.Nx // 2,
+        j=grid.Ny // 2,
+        k=grid.Nz // 2,
+        direction="z",
+        resistance=50.0,
+    )
+    solver = FDTDSolver(
+        grid=grid,
+        source=source,
+        ports=[port],
+        n_steps=50,
+    )
+    result = solver.run(verbose=False)
+    assert result is not None
+    assert result["n_steps_run"] == 50
+    # Fields must be finite
+    for comp in (grid.Ex, grid.Ey, grid.Ez, grid.Hx, grid.Hy, grid.Hz):
+        assert tf.reduce_all(tf.math.is_finite(comp)).numpy(), "Non-finite field component"

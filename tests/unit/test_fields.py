@@ -24,8 +24,11 @@ def test_curl_of_uniform_field_is_zero():
 
     dt_over_mu = tf.ones([Nz, Ny, Nx], dtype=tf.float32) * 1e-12
     dx = dy = dz = 0.001
+    inv_dx = tf.constant(1.0 / dx, shape=(1, 1, Nx - 1), dtype=tf.float32)
+    inv_dy = tf.constant(1.0 / dy, shape=(1, Ny - 1, 1), dtype=tf.float32)
+    inv_dz = tf.constant(1.0 / dz, shape=(Nz - 1, 1, 1), dtype=tf.float32)
 
-    update_H(Ex, Ey, Ez, Hx, Hy, Hz, dt_over_mu, dx, dy, dz)
+    update_H(Ex, Ey, Ez, Hx, Hy, Hz, dt_over_mu, inv_dx, inv_dy, inv_dz)
 
     assert float(tf.reduce_max(tf.abs(Hx)).numpy()) == pytest.approx(0.0, abs=1e-15)
     assert float(tf.reduce_max(tf.abs(Hy)).numpy()) == pytest.approx(0.0, abs=1e-15)
@@ -47,6 +50,9 @@ def test_energy_conservation_pec_cavity():
     dt_over_mu = tf.constant(dt / MU0, dtype=tf.float32) * tf.ones([Nz, Ny, Nx], tf.float32)
     Ca = tf.ones([Nz, Ny, Nx], dtype=tf.float32)  # no loss
     Cb = tf.constant(dt / EPS0, dtype=tf.float32) * tf.ones([Nz, Ny, Nx], tf.float32)
+    inv_dx = tf.constant(1.0 / dx, shape=(1, 1, Nx - 1), dtype=tf.float32)
+    inv_dy = tf.constant(1.0 / dy, shape=(1, Ny - 1, 1), dtype=tf.float32)
+    inv_dz = tf.constant(1.0 / dz, shape=(Nz - 1, 1, 1), dtype=tf.float32)
 
     # Initialise Ez with a sinusoidal pattern (satisfies PEC BCs: zero at boundaries)
     k = np.arange(Nz); j = np.arange(Ny); i = np.arange(Nx)
@@ -64,8 +70,8 @@ def test_energy_conservation_pec_cavity():
 
     # Run 100 steps
     for _ in range(100):
-        update_H(Ex, Ey, Ez, Hx, Hy, Hz, dt_over_mu, dx, dy, dz)
-        update_E(Ex, Ey, Ez, Hx, Hy, Hz, Ca, Cb, dx, dy, dz)
+        update_H(Ex, Ey, Ez, Hx, Hy, Hz, dt_over_mu, inv_dx, inv_dy, inv_dz)
+        update_E(Ex, Ey, Ez, Hx, Hy, Hz, Ca, Cb, inv_dx, inv_dy, inv_dz)
         # PEC: zero tangential E at boundaries (implicit since the slicing
         # in update_E starts at index 1 and our init is zero at boundaries)
 

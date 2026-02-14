@@ -25,13 +25,13 @@ def test_pec_total_reflection(analytical_solutions):
     - Measure incident and reflected amplitudes
     - Verify Γ = E_reflected / E_incident = -1
     """
-    # 1D-like grid
+    # 1D-like grid; need Nx, Ny >= 3 so H updates see the center (Ny//2, Nx//2)
     grid = YeeGrid(
         x_range=(0, 3e-3),
         y_range=(0, 3e-3),
         z_range=(0, 40e-3),
         f0=10e9,
-        resolution=20,
+        resolution=40,
         courant=0.5
     )
     
@@ -50,25 +50,30 @@ def test_pec_total_reflection(analytical_solutions):
     z_src = 15
     source = GaussianPulse(f0=10e9, bandwidth=4e9)
     
-    # Recording points
+    # Recording points (z_near_pec away from surface to avoid node)
     z_before = 10  # Before PEC
-    z_near_pec = 2  # Near PEC
+    z_near_pec = 8  # Near PEC but not at surface where E=0
     
     Ey_before = []
     Ey_near = []
     
-    # Time stepping with PEC at z_min
+    coeffs = grid.get_curl_coefficients()
+    inv_dx, inv_dy, inv_dz = coeffs["inv_dx"], coeffs["inv_dy"], coeffs["inv_dz"]
     n_steps = 800
     for n in range(n_steps):
-        Hx, Hy, Hz = update_H(Hx, Hy, Hz, Ex, Ey, Ez, grid, mat)
-        Ex, Ey, Ez = update_E(Ex, Ey, Ez, Hx, Hy, Hz, grid, mat)
+        update_H(Ex, Ey, Ez, Hx, Hy, Hz, mat.dt_over_mu, inv_dx, inv_dy, inv_dz)
+        update_E(Ex, Ey, Ez, Hx, Hy, Hz, mat.Ca, mat.Cb, inv_dx, inv_dy, inv_dz)
         
         # Apply PEC at z=0
-        Ex, Ey, Ez = apply_pec(Ex, Ey, Ez, faces={'z_min': True})
+        apply_pec(Ex, Ey, Ez, {'z-'})
         
-        # Inject source
-        amplitude = source.evaluate(n * grid.dt)
-        Ey[z_src, grid.Ny//2, grid.Nx//2].assign_add(amplitude)
+        # Inject source (Variable slice has no assign_add; use tensor_scatter_nd_update + assign)
+        amplitude = source(n * grid.dt)
+        amp = float(amplitude.numpy()) if hasattr(amplitude, 'numpy') else float(amplitude)
+        idx = tf.constant([[z_src, grid.Ny//2, grid.Nx//2]], dtype=tf.int32)
+        new_val = Ey[z_src, grid.Ny//2, grid.Nx//2].numpy() + amp
+        updated = tf.tensor_scatter_nd_update(Ey.read_value(), idx, tf.constant([new_val], dtype=Ey.dtype))
+        Ey.assign(updated)
         
         # Record
         Ey_before.append(Ey[z_before, grid.Ny//2, grid.Nx//2].numpy())
@@ -124,7 +129,7 @@ def test_pec_tangential_e_field_zero():
     Hz = tf.Variable(tf.zeros([grid.Nz, grid.Ny, grid.Nx], dtype=tf.float32))
     
     # Apply PEC at z_min
-    Ex, Ey, Ez = apply_pec(Ex, Ey, Ez, faces={'z_min': True})
+    apply_pec(Ex, Ey, Ez, {'z-'})
     
     # Check that tangential components (Ex, Ey) are zero at z=0
     Ex_at_pec = Ex[0, :, :].numpy()
@@ -155,11 +160,7 @@ def test_pec_all_faces():
     Ez = tf.Variable(tf.ones([grid.Nz, grid.Ny, grid.Nx], dtype=tf.float32) * 2.0)
     
     # Apply PEC on all faces
-    Ex, Ey, Ez = apply_pec(Ex, Ey, Ez, faces={
-        'x_min': True, 'x_max': True,
-        'y_min': True, 'y_max': True,
-        'z_min': True, 'z_max': True
-    })
+    apply_pec(Ex, Ey, Ez, {'x-', 'x+', 'y-', 'y+', 'z-', 'z+'})
     
     # Check all boundaries
     # x_min: Ey, Ez should be zero
@@ -224,18 +225,22 @@ def test_pec_standing_wave_pattern():
     # Record amplitude distribution along z
     amplitude_profile = np.zeros(grid.Nz)
     
-    # Run until steady state
+    coeffs = grid.get_curl_coefficients()
+    inv_dx, inv_dy, inv_dz = coeffs["inv_dx"], coeffs["inv_dy"], coeffs["inv_dz"]
     n_steps = 2000
     for n in range(n_steps):
-        Hx, Hy, Hz = update_H(Hx, Hy, Hz, Ex, Ey, Ez, grid, mat)
-        Ex, Ey, Ez = update_E(Ex, Ey, Ez, Hx, Hy, Hz, grid, mat)
+        update_H(Ex, Ey, Ez, Hx, Hy, Hz, mat.dt_over_mu, inv_dx, inv_dy, inv_dz)
+        update_E(Ex, Ey, Ez, Hx, Hy, Hz, mat.Ca, mat.Cb, inv_dx, inv_dy, inv_dz)
         
         # Apply PEC at z=0
-        Ex, Ey, Ez = apply_pec(Ex, Ey, Ez, faces={'z_min': True})
+        apply_pec(Ex, Ey, Ez, {'z-'})
         
-        # Continuous sine source
-        amplitude = np.sin(omega * n * grid.dt)
-        Ey[z_src, grid.Ny//2, grid.Nx//2].assign_add(amplitude * 0.1)
+        # Continuous sine source (use tensor_scatter_nd_update + assign)
+        amplitude = np.sin(omega * n * grid.dt) * 0.1
+        idx = tf.constant([[z_src, grid.Ny//2, grid.Nx//2]], dtype=tf.int32)
+        new_val = Ey[z_src, grid.Ny//2, grid.Nx//2].numpy() + amplitude
+        updated = tf.tensor_scatter_nd_update(Ey.read_value(), idx, tf.constant([new_val], dtype=Ey.dtype))
+        Ey.assign(updated)
         
         # After steady state, record profile
         if n > 1500:
@@ -280,22 +285,22 @@ def test_pec_patch_antenna_ground():
     Ey = tf.Variable(tf.ones([grid.Nz, grid.Ny, grid.Nx], dtype=tf.float32) * 3.0)
     Ez = tf.Variable(tf.ones([grid.Nz, grid.Ny, grid.Nx], dtype=tf.float32) * 1.0)
     
-    # Apply PEC patch at z=5 (middle plane)
-    k_patch = 5
-    i_range = (2, 8)
-    j_range = (2, 8)
+    # Apply PEC patch in middle plane (k index must be within [0, Nz))
+    k_patch = min(5, grid.Nz - 1)
+    i_range = (2, min(8, grid.Nx))
+    j_range = (2, min(8, grid.Ny))
     
-    Ex, Ey, Ez = apply_pec_patch(Ex, Ey, Ez, i_range, j_range, k_patch, normal='z')
+    apply_pec_patch(Ex, Ey, Ez, i_range, j_range, k_patch, normal='z')
     
-    # Tangential components (Ex, Ey) should be zero in the patch region
-    Ex_patch = Ex[i_range[0]:i_range[1], j_range[0]:j_range[1], k_patch].numpy()
-    Ey_patch = Ey[i_range[0]:i_range[1], j_range[0]:j_range[1], k_patch].numpy()
+    # Array shape is [Nz, Ny, Nx]; patch is at k=k_patch, i in i_range, j in j_range
+    Ex_patch = Ex[k_patch, j_range[0]:j_range[1], i_range[0]:i_range[1]].numpy()
+    Ey_patch = Ey[k_patch, j_range[0]:j_range[1], i_range[0]:i_range[1]].numpy()
     
     assert np.allclose(Ex_patch, 0.0, atol=1e-10), "Ex not zero on PEC patch"
     assert np.allclose(Ey_patch, 0.0, atol=1e-10), "Ey not zero on PEC patch"
     
-    # Outside patch region should be unchanged
-    Ex_outside = Ex[0, 0, k_patch].numpy()
-    Ey_outside = Ey[0, 0, k_patch].numpy()
+    # Outside patch region should be unchanged (e.g. at k=0, j=0, i=0)
+    Ex_outside = Ex[0, 0, 0].numpy()
+    Ey_outside = Ey[0, 0, 0].numpy()
     assert Ex_outside == pytest.approx(2.0), "Ex changed outside patch"
     assert Ey_outside == pytest.approx(3.0), "Ey changed outside patch"
