@@ -1,0 +1,64 @@
+# Patch antenna simulation for 2.4 GHz
+# ------------------------------------------------------------------------------
+# Reproduces the openEMS simple patch antenna example
+# Expected: resonance around 2.4 GHz with good impedance matching
+
+device: auto
+
+name: patch_antenna_2.4GHz
+description: "Simple microstrip patch antenna for 2.4 GHz on FR-4 substrate"
+
+# Geometry: patch antenna with substrate
+geometry:
+  type: patch_antenna
+  patch_width: 32e-3        # 32 mm (resonant dimension)
+  patch_length: 40e-3       # 40 mm
+  substrate:
+    width: 60e-3            # 60 mm
+    length: 60e-3           # 60 mm  
+    thickness: 1.524e-3     # 1.524 mm (standard FR-4)
+    eps_r: 3.38             # FR-4 relative permittivity
+    kappa: 1e-3             # Loss tangent
+  feed_x: -6e-3             # Feed position: 6 mm from center towards -x
+  sim_box: [200e-3, 200e-3, 150e-3]  # Air box for radiation
+
+# Frequency: centered at 2.4 GHz
+frequency:
+  f0: 2.4e9
+  bandwidth: 1e9
+  f_min: 2e9
+  f_max: 3e9
+
+# Port: lumped port at feed point
+port:
+  type: lumped
+  resistance: 50.0          # 50 Ohm feed
+
+# FDTD grid
+grid:
+  resolution: 20            # Cells per wavelength (λ/20 ≈ 6.25 mm at 2.4 GHz)
+  n_pml: 10                 # PML thickness
+  courant: 0.5              # CFL factor
+
+# Boundary conditions: PML on all faces (radiating structure)
+boundaries:
+  pec: []                   # No PEC faces (internal patch/ground handled separately)
+  pml: ["x-", "x+", "y-", "y+", "z-", "z+"]
+
+# Near-field to far-field transformation
+nf2ff:
+  enabled: true
+  box_margin: 10e-3         # Margin around structure (10 mm)
+  record_interval: 10       # Record every 10 steps
+
+# Time stepping
+run:
+  n_steps: 30000            # Total time steps
+  snapshot_interval: 500    # Field snapshots every 500 steps
+  conv_tol: 1e-4            # Convergence tolerance
+
+# Output
+output:
+  dir: Simulations/Patch_Antenna/outputs
+  record_simulation_time: true
+  save: [s_parameters, E]   # Save S-parameters and E-field snapshots

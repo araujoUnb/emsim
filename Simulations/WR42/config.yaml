@@ -1,0 +1,62 @@
+# WR-42 rectangular waveguide simulation (aligned with openEMS Rect_WG tutorial)
+# ------------------------------------------------------------------------------
+# Dimensions and frequency range match openEMS: a=10.7 mm, b=4.3 mm, 20–26 GHz
+# Expected: |S11| < -30 dB, |S21| ≈ 0 dB for a uniform lossless section
+#
+# device: auto | cpu | gpu — where to run (auto = GPU if available, else CPU; use cpu if no GPU/drivers)
+device: auto
+
+name: wr42
+description: "WR-42 rectangular waveguide, 20–26 GHz (openEMS Rect_WG match)"
+
+# Simulation domain (spatial box) [m]
+# openEMS: 10700 um, 4300 um, 50000 um => 10.7e-3, 4.3e-3, 50e-3
+domain:
+  x: [0, 10.7e-3]
+  y: [0, 4.3e-3]
+  z: [0, 50e-3]
+
+# Frequency and mode (openEMS: f_start=20e9, f_stop=26e9, Gauss center ~23 GHz)
+frequency:
+  f0: 23e9
+  bandwidth: 6e9
+  f_min: 20e9
+  f_max: 26e9
+
+mode:
+  type: TE10
+
+# FDTD grid (openEMS: mesh_res = lambda0/30 => resolution 30; NrTS=1e4)
+grid:
+  resolution: 30
+  n_pml: 10
+  courant: 0.5
+
+# Boundary conditions: PEC on waveguide walls, PML on open ends
+boundaries:
+  pec: ["x-", "x+", "y-", "y+"]
+  pml: ["z-", "z+"]
+
+# Time stepping (openEMS NrTS=1e4)
+# conv_tol: optional; temporal convergence criterion for early stopping
+#   Stops when relative field change ||E(t) - E(t-100dt)|| / ||E(t)|| < conv_tol
+#   Checked every 100 steps after at least 25% of n_steps (min 500) to allow
+#   source propagation and reflections to settle. Use ~1e-6 for waveguides.
+run:
+  n_steps: 10000
+  snapshot_interval: 500
+  conv_tol: 1e-3   # temporal convergence (relative change in field)
+
+# Post-processing: list used by postprocess.py (run separately) to generate figures
+postprocess:
+  - structure_3d
+  - s_parameters
+  - field_snapshots
+
+# Output directory (relative to project root or absolute)
+# record_simulation_time: write duration to run_info.yaml and print to console
+# save: list of outputs to write at end of run. Options: s_parameters, E (Ez snapshots as CSV). H supported in future.
+output:
+  dir: Simulations/WR42/outputs
+  record_simulation_time: true
+  save: [s_parameters, E]
