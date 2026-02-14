@@ -43,11 +43,11 @@ setup_device("auto", enable_xla=True, mixed_precision=True)
 
 When only part of the domain needs fine resolution, a **non-uniform grid** (variable dx, dy, dz per direction) can reduce total cell count and runtime compared to a globally fine uniform grid. To evaluate gains for your setup:
 
-- Run the benchmark and inspect tables/plots in **Tutorial/grid/**:
+- Run the benchmark and inspect tables/plots in **Tutorial/02_grid/**:
   ```bash
-  python Tutorial/grid/run_efficiency_benchmark.py
+  python Tutorial/02_grid/run_efficiency_benchmark.py
   ```
-- See `Tutorial/grid/results.md` and `results.csv` for metrics (cells, time, cells/s) comparing uniform vs non-uniform for a representative scenario (local refinement in the centre). Use the same idea to add your own scenarios and plots.
+- See `Tutorial/02_grid/results.md` and `results.csv` for metrics (cells, time, cells/s) comparing uniform vs non-uniform for a representative scenario (local refinement in the centre). Use the same idea to add your own scenarios and plots.
 
 Expect noticeable gain when a small fraction of the domain requires fine resolution; gain is marginal when most of the domain is already fine.
 

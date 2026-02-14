@@ -2,8 +2,8 @@
 
 | Config | Células | Tempo (s) | Células/s |
 | --- | --- | --- | --- |
-| Uniforme (fino global) | 540 | 0.873 | 185590 |
-| Não uniforme (fino no centro) | 450 | 0.807 | 167346 |
+| Uniforme (fino global) | 540 | 0.880 | 184010 |
+| Não uniforme (fino no centro) | 450 | 0.810 | 166618 |
 
 ## Conclusão
 

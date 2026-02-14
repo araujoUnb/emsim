@@ -13,7 +13,7 @@ Esta pasta contém scripts e resultados para avaliar **ganhos de eficiência** a
 A partir da raiz do projeto:
 
 ```bash
-python Tutorial/grid/run_efficiency_benchmark.py
+python Tutorial/02_grid/run_efficiency_benchmark.py
 ```
 
 O script escreve:

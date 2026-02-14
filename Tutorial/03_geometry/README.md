@@ -13,20 +13,20 @@ Recomendado: abrir o notebook no Jupyter para ver os gráficos 3D interativos.
 
 ```bash
 cd /path/to/emsim
-jupyter notebook Tutorial/geometry/tutorial_geometry.ipynb
+jupyter notebook Tutorial/03_geometry/tutorial_geometry.ipynb
 ```
 
-Ou executar como script (gera imagens em `Tutorial/geometry/figures/`):
+Ou executar como script (gera imagens em `Tutorial/03_geometry/figures/`):
 
 ```bash
-python Tutorial/geometry/run_tutorial_geometry.py
+python Tutorial/03_geometry/run_tutorial_geometry.py
 ```
 
 **Ver volume e rotacionar a cena 3D**
 
 - **Janela (desktop):** use o modo interativo para abrir uma janela PyVista por geometria; pode rotacionar com o rato.
   ```bash
-  python Tutorial/geometry/run_tutorial_geometry.py --interactive
+  python Tutorial/03_geometry/run_tutorial_geometry.py --interactive
   ```
 - **No browser (Jupyter):** no notebook, use `plot_geometry(..., backend="pyvista")` para ver o widget 3D no próprio notebook e rotacionar aí.
 

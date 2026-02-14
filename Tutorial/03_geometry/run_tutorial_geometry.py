@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Executa o tutorial de geometria sem Jupyter: formas básicas, operações e waveguide.
-Gera figuras em Tutorial/geometry/figures/.
+Gera figuras em Tutorial/03_geometry/figures/.
 Modo interativo (janela que pode rotacionar): use --interactive.
-  python Tutorial/geometry/run_tutorial_geometry.py --interactive
+  python Tutorial/03_geometry/run_tutorial_geometry.py --interactive
 """
 
 import argparse
